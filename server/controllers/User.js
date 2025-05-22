@@ -39,7 +39,7 @@ export const UserLogin = async (req, res, next) => {
     try {
         const { email, password } = req.body;
         const user = await User.findOne({ email }).exec();
-        if (!existedUser) {
+        if  (!existedUser) {
             return next(createError(409, "Email is already in use"));
         }
 
@@ -151,6 +151,7 @@ const getUserDashboard = async (req, res, next) => {
                 },
             },
         ]);
+        
         const pieChartData = categoryCalories.map((category, index) => ({
             id: index,
             value: category.totalCaloriesBurnt,
@@ -208,3 +209,38 @@ const getUserDashboard = async (req, res, next) => {
         next(error);
     }   
 };
+
+export const getWorkoutsByDate = async (req, res, next) => {
+    try {
+        const userId = req.user?.id;
+        const user = await User.findById(userId);
+        console.log(req.query.date);
+        let date = req.query.date ? new Date(req.query.date) : new Date();
+        console.log(date);
+        if (!user) {
+            return next(createError(404, "User not found"));
+        }
+        const startOfDay = new Date(
+            date.getFullYear(),
+            date.getMonth(),
+            date.getDate()
+        );
+        const endOfDay = new Date(
+            date.getFullYear(),
+            date.getMonth(),
+            date.getDate() + 1
+        );
+
+        const todaysWorkouts = await Workout.find({
+            userId: userId,
+            date: {
+                $gte: startOfDay,
+                $lt: endOfDay, 
+            },
+        });
+        const totalCaloriesBurnt = todaysWorkouts.reduce((total, workout) => total + workout.caloriesBurned, 0);
+        
+    } catch (error) {
+        next(error);
+    }
+}
