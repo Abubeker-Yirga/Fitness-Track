@@ -39,46 +39,26 @@ export const UserLogin = async (req, res, next) => {
     try {
         const { email, password } = req.body;
         const user = await User.findOne({ email }).exec();
-        if  (!existedUser) {
-            return next(createError(409, "Email is already in use"));
-        }
+        if (!user) {
+            return next(createError(404, "User not found"));
+          }
+          console.log(user);
 
-        const salt = bcrypt.genSaltSync(10);
-        const hashedPassword = bcrypt.hashSync(password, salt);
+       // Check if password is correct
+    const isPasswordCorrect = await bcrypt.compareSync(password, user.password);
+    if (!isPasswordCorrect) {
+      return next(createError(403, "Incorrect password"));
+    }
 
-        const user = new User({
-            name, 
-            email, 
-            password: hashedPassword,
-            img,
-        });
-        const createdUser = await user.save();
-        const token = jwt.sign({ id: createdUser._id }, process.env.JWT_SECRET,
-             { expiresIn: "9999 years" });
-             return res.status(200).json({ token, user });
+    const token = jwt.sign({ id: user._id }, process.env.JWT, {
+      expiresIn: "9999 years",
+    });
+
+    return res.status(200).json({ token, user }); 
 
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Failed to register user" });
-    }
-};
-
-export const login = async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        const isPasswordValid = await bcrypt.compare(password, user.password);
-        if (!isPasswordValid) {
-            return res.status(403).json({ message: "Invalid password" });
-        }
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET,
-             { expiresIn: "9999 years" });
-             return res.status(200).json({ token, user });
-    } catch (error) {
-        next(error);
     }
 };
 
@@ -198,7 +178,8 @@ const getUserDashboard = async (req, res, next) => {
          
         }
         return res.status(200).json({
-            totalCaloriesBurnt: totalCaloriesBurnt[0].totalCaloriesBurnt : 0,
+            totalCaloriesBurnt: totalCaloriesBurnt.length > 0 
+            ? totalCaloriesBurnt[0].totalCaloriesBurnt : 0,
             totalWorkouts: totalWorkouts,
             totalWeeksCaloriesBurnt: {weeks: weeks,
                 caloriesBurned: caloriesBurned
@@ -239,8 +220,93 @@ export const getWorkoutsByDate = async (req, res, next) => {
             },
         });
         const totalCaloriesBurnt = todaysWorkouts.reduce((total, workout) => total + workout.caloriesBurned, 0);
-        
+        return res.status(200).json({todaysWorkouts, totalCaloriesBurnt});
     } catch (error) {
         next(error);
     }
 }
+
+export const addWorkout = async (req, res, next) => {
+    try {
+        const userId = req.user?.id;
+        const { workoutString } = req.body;
+        if (!workoutString) {
+            return next(createError(400, "Workout string is missing"));
+        }
+        //split workoutString into lines
+        const eachWorkout = workoutString.split(";").map((line) => line.trim());
+        // Check if any workouts start with '#' to indicate categories
+        const categories = eachWorkout.filter((workout) => workout.startsWith("#"));
+        if (categories.length === 0) {
+            return next(createError(400, "No categories found in workout string"));
+        }
+        const parseWorkouts = [];
+        let currentCategory = "";
+        let count = 0;
+
+        // loop through each line to parse workout details
+        await eachWorkout.forEach((line) => {
+            count++;
+            if (line.startsWith("#")) {
+                const parts = line?.split("\n").map((part) => part.trim());
+                console.log(parts);
+                if (parts.length < 5) {
+                    return next(createError(400, `Workout String is missing for ${count}th in workout`));
+                }
+      // Update current Category
+      currentCategory = parts[0].substring(1).trim();
+      // Extract workout details
+      const workoutDetails = parseWorkoutLine(parts);
+      if (workoutDetails == null) {
+        return next(createError(400, `Please enter in proper format`));
+        };
+
+        if (workoutDetails) {
+           // Add category to workout details
+           workoutDetails.category = currentCategory;
+           parseWorkouts.push(workoutDetails);
+            }
+        }else{
+            return next(createError(400, `Workout String is missing for ${count}th in workout`));
+        }
+        });
+        //Calculate calories burnt for each workout
+        await parseWorkouts.forEach(async (workout) => {
+            workout.caloriesBurned =  parseFloat(calculateCaloriesBurnt(workout));
+            await Workout.create({...workout, user: userId});
+            });
+            return res.status(201).json({
+                message: "Workout added successfully",
+                workouts: parseWorkouts,
+            });
+          
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Function to parse workout details from a line
+const parseWorkoutLine = (parts) => {
+    const details = {};
+    console.log(parts);
+    if (parts.length >= 5) {
+      details.workoutName = parts[1].substring(1).trim();
+      details.sets = parseInt(parts[2].split("sets")[0].substring(1).trim());
+      details.reps = parseInt(
+        parts[2].split("sets")[1].split("reps")[0].substring(1).trim()
+      );
+      details.weight = parseFloat(parts[3].split("kg")[0].substring(1).trim());
+      details.duration = parseFloat(parts[4].split("min")[0].substring(1).trim());
+      console.log(details);
+      return details;
+    }
+    return null;
+  };
+  
+  // Function to calculate calories burnt for a workout
+  const calculateCaloriesBurnt = (workoutDetails) => {
+    const durationInMinutes = parseInt(workoutDetails.duration);
+    const weightInKg = parseInt(workoutDetails.weight);
+    const caloriesBurntPerMinute = 5; // Sample value, actual calculation may vary
+    return durationInMinutes * caloriesBurntPerMinute * weightInKg;
+  };
