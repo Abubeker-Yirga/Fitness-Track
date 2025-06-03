@@ -62,7 +62,7 @@ export const UserLogin = async (req, res, next) => {
     }
 };
 
-const getUserDashboard = async (req, res, next) => {
+export const getUserDashboard = async (req, res, next) => {
     const { id } = req.params;
     try {
         const userId = req.user?.id;
